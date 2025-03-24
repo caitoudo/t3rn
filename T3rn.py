@@ -23,8 +23,8 @@ def clear_terminal():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 description = """
-T3RN--AUTOSWAP   V2
-X:@caitoudu  菜头Do
+T3RN--AUTOSWAP------V2
+X:@caitoudu ------菜头Do
 """
 
 # 每个链的颜色和符号
@@ -82,7 +82,7 @@ def check_balance(web3, my_address):
 # 创建和发送交易的函数
 def send_bridge_transaction(web3, account, my_address, data, network_name):
     nonce = web3.eth.get_transaction_count(my_address, 'pending')
-    value_in_ether = 0.301
+    value_in_ether = 0.501
     value_in_wei = web3.to_wei(value_in_ether, 'ether')
 
     try:
@@ -92,10 +92,10 @@ def send_bridge_transaction(web3, account, my_address, data, network_name):
             'data': data,
             'value': value_in_wei
         })
-        gas_limit = gas_estimate + 50000  # 增加安全边际
+        gas_limit = gas_estimate + 50000
     except Exception as e:
         print(f"估计gas错误: {e}")
-        return None, None
+        return None  # 直接返回 None 表示完全失败
 
     base_fee = web3.eth.get_block('latest')['baseFeePerGas']
     priority_fee = web3.to_wei(5, 'gwei')
@@ -113,23 +113,20 @@ def send_bridge_transaction(web3, account, my_address, data, network_name):
     }
 
     try:
-        signed_txn = Account.sign_transaction(transaction, account.key)
+        signed_txn = web3.eth.account.sign_transaction(transaction, account.key)
     except Exception as e:
         print(f"签名交易错误: {e}")
-        return None, None
+        return None
 
     try:
-        tx_hash = web3.eth.send_raw_transaction(signed_txn.rawTransaction)
-        tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        tx_hash = web3.eth.send_raw_transaction(signed_txn.raw_transaction)
+        tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
 
-        # 获取最新余额
         balance = web3.eth.get_balance(my_address)
         formatted_balance = web3.from_wei(balance, 'ether')
 
-        # 获取区块浏览器链接
-        explorer_link = f"{explorer_urls[network_name]}{tx_hash.hex()}"
+        explorer_link = f"{explorer_urls[network_name]}{web3.to_hex(tx_hash)}"
 
-        # 显示交易信息
         print(f"{green_color}📤 发送地址: {account.address}")
         print(f"⛽ 使用Gas: {tx_receipt['gasUsed']}")
         print(f"🗳️  区块号: {tx_receipt['blockNumber']}")
@@ -138,10 +135,10 @@ def send_bridge_transaction(web3, account, my_address, data, network_name):
         print(f"🔵 b2n余额: {b2n_balance} b2n")
         print(f"🔗 区块浏览器链接: {explorer_link}\n{reset_color}")
 
-        return tx_hash.hex(), value_in_ether
+        return web3.to_hex(tx_hash), value_in_ether
     except Exception as e:
         print(f"发送交易错误: {e}")
-        return None, None
+        return None
 
 # 新增：多地址时自动 动态替换data结构中的地址部分
 def replace_middle_address(original_data, current_address):
@@ -173,28 +170,25 @@ def replace_middle_address(original_data, current_address):
 # 逐个地址处理交易
 def process_single_address_transaction(web3, account, network_name, bridge, successful_txs):
     my_address = account.address
-    print(f"正在处理地址: {my_address}")
 
-    # 获取 data
     original_data = data_bridge.get(bridge)
     if not original_data:
         print(f"桥接 {bridge} 数据不可用!")
         return successful_txs
 
-    try:
-        # 动态替换 data 地址部分
-        modified_data = replace_middle_address(original_data, my_address)
-    except ValueError as e:
-        print(f"地址替换错误: {e}")
-        return successful_txs
+    modified_data = replace_middle_address(original_data, my_address)
 
-    # 发送交易
-    tx_hash, value_sent = send_bridge_transaction(web3, account, my_address, modified_data, network_name)
-    if tx_hash:
+    # 只有成功时才处理
+    result = send_bridge_transaction(web3, account, my_address, modified_data, network_name)
+    if result is not None:
+        tx_hash, value_sent = result
         successful_txs += 1
-        print(f"{chain_symbols[network_name]}🚀 成功交易总数: {successful_txs} | 桥接: {bridge} | 金额: {value_sent:.5f} ETH ✅{reset_color}\n")
+        # 添加对 network_name 的检查
+        symbol_color = chain_symbols.get(network_name, reset_color)
+        print(f"{symbol_color}🚀 成功交易总数: {successful_txs} | 桥接: {bridge} | 金额: {value_sent:.5f} ETH ✅{reset_color}\n")
+    else:
+        print(f"{chain_symbols.get(network_name, reset_color)}❌ 交易失败 {reset_color}")
 
-    # 交易间短延时
     wait_time = random.uniform(0.8, 1)
     time.sleep(wait_time)
     return successful_txs
@@ -205,6 +199,7 @@ def main():
 
     successful_txs = 0
     level = 1
+    num_addresses = len(private_keys)
     address_state = AddressState(private_keys, initial_network='Base')  # 初始化地址状态
 
     while True:
@@ -227,13 +222,13 @@ def main():
 
             # 检查当前网络余额是否足够
             balance = check_balance(web3, my_address)
-            if balance < 0.301:
+            if balance < 0.501:
                 print(f"{chain_symbols[current_network]}⚠️ {my_address} 在 {current_network} 余额不足 0.301 ETH，尝试切换到 {alternate_network}{reset_color}")
 
                 # 检查目标网络余额
                 alt_web3 = Web3(Web3.HTTPProvider(networks[alternate_network]['rpc_url']))
                 alt_balance = check_balance(alt_web3, my_address)
-                if alt_balance >= 0.301:
+                if alt_balance >= 0.501:
                     new_network = address_state.switch_network(my_address)
                     current_network = new_network
                     web3 = alt_web3
@@ -243,6 +238,7 @@ def main():
                     continue
 
             # 处理当前地址的交易
+            print(f"正在处理地址 {i+1}/{num_addresses}: {my_address}")
             bridge_name = "Base - OP Sepolia" if current_network == 'Base' else "OP - Base"
             successful_txs = process_single_address_transaction(
                 web3, account, current_network, bridge_name, successful_txs
